@@ -9,12 +9,13 @@ public class TemporaryCredentialsProvider {
         TreeMap<String, Object> config = new TreeMap<String, Object>();
 
         try {
-            //这里的 SecretId 和 SecretKey 代表了用于申请临时密钥的永久身份（主账号、子账号等），子账号需要具有操作存储桶的权限。
-            String secretId = "AKIDDM5M3q1LmEwcKxT0UtZAgKTYZPTblu5E";//用户的 SecretId，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
-            String secretKey = "Of2MmLPScvGoHmQqLqjjimUUPTAEdq7R";//用户的 SecretKey，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
-            // 替换为您的云 api 密钥 SecretId
+            // SecretId/SecretKey 从环境变量读取，勿提交到仓库。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
+            String secretId = System.getenv("TENCENT_SECRET_ID");
+            String secretKey = System.getenv("TENCENT_SECRET_KEY");
+            if (secretId == null || secretId.isBlank() || secretKey == null || secretKey.isBlank()) {
+                throw new IllegalStateException("请设置环境变量 TENCENT_SECRET_ID 和 TENCENT_SECRET_KEY");
+            }
             config.put("secretId", secretId);
-            // 替换为您的云 api 密钥 SecretKey
             config.put("secretKey", secretKey);
 
 
