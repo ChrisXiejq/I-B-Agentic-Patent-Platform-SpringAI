@@ -1,15 +1,16 @@
 spring:
+  application:
+    name: backend
+  profiles:
+    active: local
+  # 业务数据源（MySQL）
   datasource:
-#    url: jdbc:mysql://110.40.206.206:3306/ib
-#    username: IB
-#    password: RRXY6tbAr5CY4rP6
     url: jdbc:mysql://49.235.179.94/ib
     username: ib
     password: AMEftwWK2cakz5Nh
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
-#      host: 110.40.206.206
       host: 49.235.179.94
       port: 6379
       database: 0
@@ -17,54 +18,64 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
-  # Spring AI：对接通义千问（OpenAI 兼容），替代 LLM base
+  # Spring AI 配置
   ai:
-    openai:
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      api-key: ${sk-b9dc7ac8811d4a10b9ee1f084005053c}
+    dashscope:
+      # 需要替换为你自己的 key，或使用环境变量 DASHSCOPE_API_KEY
+      api-key: ${DASHSCOPE_API_KEY:sk-b9dc7ac8811d4a10b9ee1f084005053c}
       chat:
         options:
           model: qwen-plus
-          temperature: 0.2
-  # Weaviate 向量库（Weaviate Cloud）
-  vectorstore:
-    weaviate:
-      host: 5hecsnlitndtynkumy12w.c0.europe-west3.gcp.weaviate.cloud
-      scheme: https
-      api-key: cm1EUktKL1ZZYVZKakhybl9JNmNFMElrU2FiOG04Snl2eWhkR21yMlNneHQwN2FlVmxIV0UwOVhzSVo0PV92MjAw
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: gemma3:1b
+    # 临时注释掉，便于开发调试和部署（实际需要启动 MCP 服务）
+    # mcp:
+    #   client:
+    #     sse:
+    #       connections:
+    #         server1:
+    #           url: http://localhost:8127
+    #     stdio:
+    #       servers-configuration: classpath:mcp-servers.json
+    # 临时注释掉，便于开发调试和部署（实际需要启动 PgVector 数据库）
+    # vectorstore:
+    #   pgvector:
+    #     index-type: HNSW
+    #     dimensions: 1536
+    #     distance-type: COSINE_DISTANCE
+    #     max-document-batch-size: 10000
 
 server:
   port: 8190
+  servlet:
+    context-path: /api
 
-# 可选：RAG 建索引默认 PDF 目录（与 LLM base/patent_pdfs 对齐时可填）
-app:
-  rag:
-    pdf-dir: ${RAG_PDF_DIR:}
-    top-k: 5
-    recall-per-path: 10
-    rrf-k: 60
-    rerank-enabled: false
-    # Weaviate hybrid 检索时向量与 BM25 权重，0.5 为均等
-    hybrid-alpha: 0.5
-  # Agent：模型可改为 gpt-4o；分层记忆短期轮数；可选 MCP 远程工具
-  agent:
-    model: ${AGENT_MODEL:qwen-plus}
-    memory:
-      short-term-turns: 10
-      long-term-top-k: 5
-    # MCP：启用后 Agent 可路由到独立 MCP Server（RAG/业务 API）
-    mcp:
-      enabled: false
-      server-url: ${MCP_SERVER_URL:http://localhost:8091/mcp}
-      tool-names: rag_search,patent_search
+# springdoc-openapi config
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  tags-sorter: alpha
+  operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: default
+      paths-to-match: '/**'
+      packages-to-scan: com.inovationbehavior.backend.controller
 
-# 原 gRPC 客户端已废弃（Agent/RAG 已由 Spring AI 在 backend 内实现）
-# grpc:
-#   client:
-#     rag-service:
-#       address: static://127.0.0.1:50051
-#       negotiationType: plaintext
-#     agent-service:
-#       address: 'static://localhost:50052'
-#       enableKeepAlive: true
-#       negotiationType: plaintext
+# knife4j config
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+# searchAPI（若使用搜索 API，在此填写 key）
+# search-api:
+#   api-key: 你的 API Key
+
+# 修改日志级别，查看 Spring AI 更多调用细节
+logging:
+  level:
+    org.springframework.ai: DEBUG
