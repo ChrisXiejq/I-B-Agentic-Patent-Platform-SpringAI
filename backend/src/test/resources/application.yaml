@@ -1,0 +1,1 @@
+# 测试与生产一致：使用主配置中的真实 Weaviate、OpenAI/通义等，不覆盖即沿用 application.yaml

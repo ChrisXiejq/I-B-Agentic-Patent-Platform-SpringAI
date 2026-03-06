@@ -1,0 +1,11 @@
+{
+  "name": "search_patent",
+  "description": "Search patent basic information",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "patent_no": { "type": "string" }
+    },
+    "required": ["patent_no"]
+  }
+}
