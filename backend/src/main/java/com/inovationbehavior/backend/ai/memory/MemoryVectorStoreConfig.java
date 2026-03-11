@@ -17,9 +17,9 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgDistan
 import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexType.HNSW;
 
 /**
- * Agent 多级记忆 - L2 情节记忆（Episodic Memory）向量存储。
- * 使用 PgVector 独立表 agent_memory 存储对话历史，支持语义检索。
- * 与 RAG 文档向量库（vector_store）分离，互不影响。
+ * Agent 多级记忆向量存储。
+ * - agent_memory：长期语义记忆（Layer3）
+ * - agent_experiential_memory：中期事件摘要（Layer2）
  */
 @Configuration
 @Import(PgVectorDataSourceConfig.class)
@@ -27,6 +27,7 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexT
 public class MemoryVectorStoreConfig {
 
     private static final String MEMORY_TABLE = "agent_memory";
+    private static final String EXPERIENTIAL_TABLE = "agent_experiential_memory";
     private static final String SCHEMA = "public";
 
     @Value("${spring.ai.vectorstore.pgvector.dimensions:1536}")
@@ -44,6 +45,21 @@ public class MemoryVectorStoreConfig {
                 .schemaName(SCHEMA)
                 .vectorTableName(MEMORY_TABLE)
                 .maxDocumentBatchSize(1000)
+                .build();
+    }
+
+    @Bean("experientialVectorStore")
+    public VectorStore experientialVectorStore(
+            @Qualifier("pgvectorJdbcTemplate") JdbcTemplate pgvectorJdbcTemplate,
+            EmbeddingModel embeddingModel) {
+        return PgVectorStore.builder(pgvectorJdbcTemplate, embeddingModel)
+                .dimensions(dimensions)
+                .distanceType(COSINE_DISTANCE)
+                .indexType(HNSW)
+                .initializeSchema(true)
+                .schemaName(SCHEMA)
+                .vectorTableName(EXPERIENTIAL_TABLE)
+                .maxDocumentBatchSize(500)
                 .build();
     }
 }

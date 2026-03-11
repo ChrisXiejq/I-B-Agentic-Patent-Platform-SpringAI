@@ -18,8 +18,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 长期记忆（L2）：BGE/向量相似度检索 + importance 阈值筛选入库，结合 NLI 冲突检测控制写入。
- * 与短期记忆配合：仅当 importance 达标且通过相似度去重、NLI 无冲突时才写入向量库。
+ * 第三层：Semantic/Long-Term Memory — 参考 MemoryOS。
+ * NLI 三段论：Recall → Conflict Check → Atomic Update（冲突则 UPDATE 覆盖旧事实，互补则 MERGE）。
+ * 可选 Zettelkasten 原子事实存储。
  */
 @Slf4j
 @Service
@@ -45,11 +46,17 @@ public class LongTermMemoryService {
     @Value("${app.memory.long-term.nli-check-top-k:3}")
     private int nliCheckTopK;
 
+    @Value("${app.memory.long-term.use-atomic-facts:false}")
+    private boolean useAtomicFacts;
+
     private final NliConflictDetector nliConflictDetector;
+    private final AtomicFactExtractor atomicFactExtractor;
 
     public LongTermMemoryService(
-            @org.springframework.beans.factory.annotation.Autowired(required = false) NliConflictDetector nliConflictDetector) {
+            @org.springframework.beans.factory.annotation.Autowired(required = false) NliConflictDetector nliConflictDetector,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) AtomicFactExtractor atomicFactExtractor) {
         this.nliConflictDetector = nliConflictDetector != null ? nliConflictDetector : (newContent, existing) -> false;
+        this.atomicFactExtractor = atomicFactExtractor;
     }
 
     /**
@@ -114,7 +121,7 @@ public class LongTermMemoryService {
             return;
         }
 
-        // NLI 冲突检测：检索相似记忆，若有冲突则不写入
+        // NLI 三段论：Recall → Conflict Check → Atomic Update / MERGE
         SearchRequest nliRequest = SearchRequest.builder()
                 .query(content)
                 .topK(nliCheckTopK)
@@ -123,8 +130,32 @@ public class LongTermMemoryService {
                 .build();
         List<Document> similar = memoryVectorStore.similaritySearch(nliRequest);
         if (nliConflictDetector.hasConflict(content, similar)) {
-            log.debug("Long-term store skipped: NLI conflict detected");
-            return;
+            // 冲突：UPDATE — 删除旧事实并写入新事实
+            String idToDelete = similar.isEmpty() ? null : getDocumentId(similar.get(0));
+            if (idToDelete != null) {
+                memoryVectorStore.delete(List.of(idToDelete));
+                log.debug("Long-term UPDATE: deleted conflicting doc {}", idToDelete);
+            }
+        }
+        // 互补则 MERGE（直接写入）；冲突时已删旧，此处写入新
+
+        if (useAtomicFacts && atomicFactExtractor != null) {
+            List<String> facts = atomicFactExtractor.extractFacts(userMessage, assistantMessage);
+            if (!facts.isEmpty()) {
+                for (String fact : facts) {
+                    String toStore = fact.length() > 2000 ? fact.substring(0, 1997) + "..." : fact;
+                    Document doc = new Document(toStore, Map.of(
+                            "conversation_id", conversationId,
+                            "type", "long_term_atomic",
+                            "importance", String.valueOf(importance),
+                            "turn_index", String.valueOf(turnIndex),
+                            "created_at", String.valueOf(System.currentTimeMillis())
+                    ));
+                    memoryVectorStore.add(List.of(doc));
+                }
+                log.debug("Long-term stored {} atomic facts for conversation {}", facts.size(), conversationId);
+                return;
+            }
         }
 
         Document doc = new Document(content, Map.of(
@@ -132,10 +163,17 @@ public class LongTermMemoryService {
                 "type", "long_term",
                 "role", "exchange",
                 "importance", String.valueOf(importance),
-                "turn_index", String.valueOf(turnIndex)
+                "turn_index", String.valueOf(turnIndex),
+                "created_at", String.valueOf(System.currentTimeMillis())
         ));
         memoryVectorStore.add(List.of(doc));
         log.debug("Long-term memory stored 1 exchange for conversation {} (importance={})", conversationId, importance);
+    }
+
+    private static String getDocumentId(Document doc) {
+        if (doc.getId() != null && !doc.getId().isBlank()) return doc.getId();
+        Object id = doc.getMetadata().get("id");
+        return id != null ? id.toString() : null;
     }
 
     /**

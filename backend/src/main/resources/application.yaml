@@ -54,25 +54,6 @@ spring:
          dimensions: 1536
          distance-type: COSINE_DISTANCE
          max-document-batch-size: 10000
-    # Banned words (English). Request is rejected if user input contains any; check is case-insensitive.
-    banned-words:
-      # spam / lead-gen
-      - "add wechat"
-      - "add my qq"
-      - "fake invoice"
-      - "click farming"
-      - "fake certificate"
-      # illegal
-      - "gambling"
-      - "pyramid scheme"
-      - "terrorism"
-      # scam
-      - "you have won"
-      - "click to claim prize"
-      - "free prize"
-      # profanity / abuse (expand as needed)
-      - "damn you"
-      - "go die"
 
 server:
   port: 8190
@@ -120,23 +101,29 @@ app:
       # profanity / abuse (expand as needed)
       - "damn you"
       - "go die"
-    # Reject message when a banned word is hit (optional)
-    # banned-words-reject-message: "Your input contains inappropriate content. Please revise and try again."
-  # 分层记忆（企业级）：短期=滑动窗口+摘要压缩+重要性衰减，长期=相似度+importance 阈值+NLI 控制写入
+  # 三层分层记忆（Working → Experiential → Long-Term）
   memory:
-    # 短期记忆：滑动窗口 + 摘要压缩
-    short-term:
-      window-size: 10             # 滑动窗口保留最近轮数
-      turns-to-compress: 5        # 窗口满时一次压缩的轮数
-      decay-factor-per-turn: 0.92 # importance 每轮衰减系数
-      summary-max-tokens: 300     # 摘要最大字数（LLM 压缩）
-    # 长期记忆：向量检索 + 入库策略
+    # Layer1 Working：内存、滑动窗口、动态剪枝、溢出写 Experiential
+    working:
+      window-size: 10
+      max-total-chars: 8000      # 接近时按 importance 剪枝
+      prune-threshold: 0.1       # 低于此分数的轮次（如“好的”“谢谢”）剔除
+      turns-to-compress: 5
+      summary-max-tokens: 300    # 溢出压缩为摘要时的最大 token 数
+    # Layer2 Experiential：事件摘要 + decay_weight
+    experiential:
+      top-k: 5
+      similarity-threshold: 0.4
+      decay-weight-default: 1.0
+    # 长期记忆：NLI 三段论 UPDATE/MERGE + 可选 Zettelkasten
     long-term:
+      inject-top-k: 3            # retrieve_history 重排后注入的长期记忆条数
       top-k: 5
       similarity-threshold: 0.5
-      importance-threshold: 0.25  # 低于此不写入长期
-      duplicate-similarity-threshold: 0.92  # 与已有记忆相似度高于此视为重复，不写入
-      nli-check-top-k: 3          # NLI 冲突检测时检索的相似条数
+      importance-threshold: 0.25
+      duplicate-similarity-threshold: 0.92
+      nli-check-top-k: 3
+      use-atomic-facts: false    # true 时按 entity-attribute-value 原子事实入库
     # 重要性评分（领域 NER 加权，可配置关键词）
     importance:
       patent-number-weight: 0.35
@@ -149,7 +136,7 @@ app:
   rag:
     # 文档目录（支持 classpath 和 file 路径，递归加载所有 .md）
     documents:
-#      path: "classpath*:documents/**/*.md"
+      path: "classpath*:documents/**/*.md"
     # 文档分块：递归字符切分（默认） 或 语义切分+Token 回退
     splitter:
       chunk-size: 800           # 递归切分：每块最大字符数

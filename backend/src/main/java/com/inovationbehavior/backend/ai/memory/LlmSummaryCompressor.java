@@ -22,7 +22,7 @@ public class LlmSummaryCompressor implements SummaryCompressor {
     private final int maxSummaryTokens;
 
     public LlmSummaryCompressor(ChatModel chatModel,
-                                @Value("${app.memory.short-term.summary-max-tokens:300}") int maxSummaryTokens) {
+                                @Value("${app.memory.working.summary-max-tokens:300}") int maxSummaryTokens) {
         this.chatClient = ChatClient.builder(chatModel).build();
         this.maxSummaryTokens = maxSummaryTokens;
     }

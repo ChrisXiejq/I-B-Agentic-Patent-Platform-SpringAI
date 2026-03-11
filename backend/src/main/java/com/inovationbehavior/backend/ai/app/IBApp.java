@@ -39,6 +39,7 @@ public class IBApp {
             At the opening, briefly introduce yourself and explain you can: query patent details and heat by patent number, help analyze patent technical points and applicable scenarios, and provide personalized advice based on user identity (invitation code/survey).
             During the conversation, you may proactively ask: patent numbers or technical fields of interest, commercialization intentions (license/transfer/equity investment, etc.), target industry or partner type.
             Provide concise, professional advice based on patent information from platform tools, and timely suggest users use the "query patent details" and "query patent heat" capabilities.
+            When you need to recall what the user said earlier or this conversation's history, call the retrieve_history tool with the current conversation_id and a short query (e.g. patent number or topic).
             """;
 
     public IBApp(ChatModel chatModel) {
@@ -198,22 +199,29 @@ public class IBApp {
         return content;
     }
 
-    // ========== 全能力 Agent 入口：分层记忆（短期+长期）+ RAG + 工具调用 ==========
+    // ========== 全能力 Agent：记忆按需检索（retrieve_history 工具）+ RAG + 工具调用 ==========
 
     @Autowired(required = false)
-    @Qualifier("layeredMemoryAdvisor")
-    private Advisor layeredMemoryAdvisor;
+    @Qualifier("memoryPersistenceAdvisor")
+    private Advisor memoryPersistenceAdvisor;
+
+    @Autowired(required = false)
+    @Qualifier("agentTraceAdvisor")
+    private Advisor agentTraceAdvisor;
 
     /**
-     * 全能力 Agent 同步调用：分层记忆（短期+长期）+ RAG（向量+BM25 融合）+ 工具调用
+     * 全能力 Agent 同步调用。记忆不自动注入；需要历史时 Agent 显式调用 retrieve_history(conversation_id, query)。
      */
     public String doChatWithFullAgent(String message, String chatId) {
         String rewrittenMessage = queryRewriter != null ? queryRewriter.doQueryRewrite(message) : message;
         var adv = chatClient.prompt().user(rewrittenMessage)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .advisors(new MyLoggerAdvisor());
-        if (layeredMemoryAdvisor != null) {
-            adv = adv.advisors(layeredMemoryAdvisor);
+        if (agentTraceAdvisor != null) {
+            adv = adv.advisors(agentTraceAdvisor);
+        }
+        if (memoryPersistenceAdvisor != null) {
+            adv = adv.advisors(memoryPersistenceAdvisor);
         }
         ChatResponse chatResponse = adv
                 .advisors(hybridRagAdvisor)
@@ -226,15 +234,18 @@ public class IBApp {
     }
 
     /**
-     * 全能力 Agent 流式调用：分层记忆 + RAG + 工具调用，SSE 流式返回
+     * 全能力 Agent 流式调用。记忆按需通过 retrieve_history 工具获取。
      */
     public Flux<String> doChatWithFullAgentStream(String message, String chatId) {
         String rewrittenMessage = queryRewriter != null ? queryRewriter.doQueryRewrite(message) : message;
         var adv = chatClient.prompt().user(rewrittenMessage)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 .advisors(new MyLoggerAdvisor());
-        if (layeredMemoryAdvisor != null) {
-            adv = adv.advisors(layeredMemoryAdvisor);
+        if (agentTraceAdvisor != null) {
+            adv = adv.advisors(agentTraceAdvisor);
+        }
+        if (memoryPersistenceAdvisor != null) {
+            adv = adv.advisors(memoryPersistenceAdvisor);
         }
         return adv
                 .advisors(hybridRagAdvisor)

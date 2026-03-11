@@ -1,18 +1,22 @@
 /**
- * 分层记忆架构（企业级）
+ * 三层分层记忆架构（企业级）：Working → Experiential → Long-Term。
  * <p>
- * 短期记忆：滑动窗口 + 摘要压缩管理上下文；importance 由领域 NER（专利/关键词）加权并随轮次衰减。
- * 长期记忆：按向量（BGE/当前 Embedding）相似度 + importance 阈值筛选入库，结合 NLI 冲突检测控制写入。
+ * Layer1 Working：内存、滑动窗口、动态剪枝（importance &lt; 阈值剔除）、溢出写 Experiential。
+ * Layer2 Experiential：事件摘要 + pgvector，decay_weight 重排。
+ * Layer3 Long-Term：NLI 三段论（Recall → Conflict → UPDATE/MERGE），可选 Zettelkasten 原子事实。
  * <p>
  * 主要组件：
  * <ul>
- *   <li>{@link com.inovationbehavior.backend.ai.memory.ShortTermMemoryService} 短期：窗口 + 摘要 + 衰减</li>
- *   <li>{@link com.inovationbehavior.backend.ai.memory.LongTermMemoryService} 长期：检索 + 条件写入（阈值/去重/NLI）</li>
- *   <li>{@link com.inovationbehavior.backend.ai.memory.LayeredMemoryAdvisor} 统一 Advisor，优先使用</li>
- *   <li>{@link com.inovationbehavior.backend.ai.memory.ImportanceScorer} / {@link com.inovationbehavior.backend.ai.memory.PatentDomainImportanceScorer} 重要性评分</li>
- *   <li>{@link com.inovationbehavior.backend.ai.memory.NliConflictDetector} / {@link com.inovationbehavior.backend.ai.memory.LlmNliConflictDetector} NLI 冲突检测</li>
+ *   <li>{@link WorkingMemoryService} Layer1 工作记忆</li>
+ *   <li>{@link ExperientialMemoryService} Layer2 中期事件摘要</li>
+ *   <li>{@link LongTermMemoryService} Layer3 长期语义记忆</li>
+ *   <li>{@link MemoryPersistenceAdvisor} 仅持久化，不注入</li>
+ *   <li>{@link MemoryRetrievalTool} MCP 工具 retrieve_history 按需检索</li>
+ *   <li>{@link ImportanceScorer} / {@link PatentDomainImportanceScorer} 重要性评分</li>
+ *   <li>{@link NliConflictDetector} / {@link LlmNliConflictDetector} NLI 冲突检测</li>
+ *   <li>{@link AtomicFactExtractor} / {@link LlmAtomicFactExtractor} 原子事实（Zettelkasten）</li>
  * </ul>
- * 配置见 application.yaml：app.memory.short-term / long-term / importance。
+ * 配置见 application.yaml：app.memory.working / experiential / long-term。
  */
 
 package com.inovationbehavior.backend.ai.memory;
