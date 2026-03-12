@@ -18,6 +18,7 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<langgraph4j.version>1.8.8</langgraph4j.version>
 	</properties>
 
 	<dependencyManagement>
@@ -26,6 +27,13 @@
 				<groupId>org.springframework.ai</groupId>
 				<artifactId>spring-ai-bom</artifactId>
 				<version>1.1.0-M2</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.bsc.langgraph4j</groupId>
+				<artifactId>langgraph4j-bom</artifactId>
+				<version>${langgraph4j.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -190,6 +198,11 @@
 			<groupId>com.github.xiaoymin</groupId>
 			<artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
 			<version>4.4.0</version>
+		</dependency>
+		<!-- LangGraph4j：多 Agent 图编排 -->
+		<dependency>
+			<groupId>org.bsc.langgraph4j</groupId>
+			<artifactId>langgraph4j-core</artifactId>
 		</dependency>
 
 		<dependency>

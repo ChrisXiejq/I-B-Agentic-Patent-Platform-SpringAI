@@ -46,7 +46,7 @@ public class AiController {
     public Object fullAgentPost(@Valid @RequestBody AgentRequest request) {
         String chatId = Optional.ofNullable(request.chatId()).orElse("default");
         if (Boolean.FALSE.equals(request.stream())) {
-            String content = ibApp.doChatWithFullAgent(request.message(), chatId);
+            String content = ibApp.doChatWithMultiAgentOrFull(request.message(), chatId);
             return new AgentResponse(true, content, chatId, null);
         }
         return fullAgentStreamSse(request.message(), chatId);
@@ -63,7 +63,7 @@ public class AiController {
             @RequestParam(required = false, defaultValue = "true") boolean stream) {
         String resolvedChatId = Optional.ofNullable(chatId).orElse("default");
         if (!stream) {
-            String content = ibApp.doChatWithFullAgent(message, resolvedChatId);
+            String content = ibApp.doChatWithMultiAgentOrFull(message, resolvedChatId);
             return new AgentResponse(true, content, resolvedChatId, null);
         }
         return fullAgentStreamSse(message, resolvedChatId);

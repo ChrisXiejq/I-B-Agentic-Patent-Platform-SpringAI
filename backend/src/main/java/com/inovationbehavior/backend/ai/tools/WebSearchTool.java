@@ -26,9 +26,9 @@ public class WebSearchTool {
         this.apiKey = apiKey;
     }
 
-    @Tool(description = "Search for information from Baidu Search Engine")
+    @Tool(description = "Search the web for general or up-to-date information (e.g. concepts, definitions, platform introductions). Use when RAG/knowledge base does not cover the question or to complement results.")
     public String searchWeb(
-            @ToolParam(description = "Search query keyword") String query) {
+            @ToolParam(description = "Search query keyword or question in natural language") String query) {
         Map<String, Object> paramMap = new HashMap<>();
         paramMap.put("q", query);
         paramMap.put("api_key", apiKey);

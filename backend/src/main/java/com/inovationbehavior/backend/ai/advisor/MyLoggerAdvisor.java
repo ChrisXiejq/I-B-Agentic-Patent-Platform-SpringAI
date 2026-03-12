@@ -8,6 +8,7 @@ import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
 import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
+import org.springframework.ai.chat.prompt.Prompt;
 import reactor.core.publisher.Flux;
 
 /**
@@ -27,13 +28,26 @@ public class MyLoggerAdvisor implements CallAdvisor, StreamAdvisor {
 		return 0;
 	}
 
+	private static final String LOG_PREFIX = "[AgentGraph.LLM] ";
+
 	private ChatClientRequest before(ChatClientRequest request) {
-		log.info("AI Request: {}", request.prompt());
+		Prompt prompt = request.prompt();
+		String promptText = prompt != null ? prompt.getContents() : null;
+		log.info("{}Request prompt(length={}) preview={}", LOG_PREFIX,
+				promptText != null ? promptText.length() : 0, abbreviate(promptText, 200));
 		return request;
 	}
 
 	private void observeAfter(ChatClientResponse chatClientResponse) {
-		log.info("AI Response: {}", chatClientResponse.chatResponse().getResult().getOutput().getText());
+		String text = chatClientResponse.chatResponse().getResult().getOutput().getText();
+		log.info("{}Response length={} preview={}", LOG_PREFIX, text != null ? text.length() : 0, abbreviate(text, 300));
+	}
+
+	private static String abbreviate(String s, int maxLen) {
+		if (s == null) return "null";
+		s = s.trim();
+		if (s.length() <= maxLen) return s;
+		return s.substring(0, maxLen) + "...";
 	}
 
 	@Override

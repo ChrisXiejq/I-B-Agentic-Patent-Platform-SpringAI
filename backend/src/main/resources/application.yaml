@@ -79,6 +79,11 @@ knife4j:
   setting:
     language: zh_cn
 
+# 网页搜索（SearchAPI.io，供检索专家 searchWeb 工具调用，如百度搜索）
+# 未配置时 searchWeb 调用会报错；申请与配置见下方说明或 README
+search-api:
+  api-key: "${SEARCH_API_KEY:}"
+
 # AI 与 Agent 配置
 app:
   ai:
@@ -149,6 +154,13 @@ app:
       bm25-top-k: 8      # BM25 检索 top-k
       final-top-k: 6     # RRF 融合后 rerank 保留的 top-k
 
+  # 多 Agent 图编排（LangGraph4j）
+  agent:
+    graph:
+      max-steps: 5   # 专家节点最大步数，防止死循环
+    # true=打印每次工具调用的名称、入参和返回（[AgentTrace.Tool]），便于观察图内专家调用了哪些工具
+    trace-tools: true
+
   # RAG/Agent 自动化评估（测试集路径、RAGAS 样本数等）
   eval:
     rag:
@@ -157,7 +169,12 @@ app:
       max-ragas-samples: 5         # RAGAS 评估最多样本数（每条约 4 次 LLM 调用，建议先设小值）
       ragas-export-path: "target/ragas-eval-input.json"  # Java 导出供 Python ragas 读取的文件路径
 
-# 修改日志级别，查看 Spring AI 更多调用细节
+# 日志级别：Agent 图编排与 Spring AI 调用细节
 logging:
   level:
     org.springframework.ai: DEBUG
+    # 多 Agent 图：节点进入/离开、路由决策、专家输出预览、图执行开始/结束（[AgentGraph] 前缀）
+    com.inovationbehavior.backend.ai.graph: INFO
+    com.inovationbehavior.backend.ai.app: INFO
+    # 工具调用追踪：每次工具 name、input、result 预览（需 app.agent.trace-tools=true）
+    com.inovationbehavior.backend.ai.config.TracingToolCallbackProvider: INFO

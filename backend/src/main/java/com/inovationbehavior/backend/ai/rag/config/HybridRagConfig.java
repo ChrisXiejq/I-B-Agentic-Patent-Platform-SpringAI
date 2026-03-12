@@ -74,4 +74,16 @@ public class HybridRagConfig {
                 .queryAugmenter(ContextualQueryAugmenterFactory.createInstance())
                 .build();
     }
+
+    /**
+     * 检索专家专用 RAG Advisor：空上下文时使用“要求先调用 searchWeb”的模板，从而触发上网查询。
+     */
+    @Bean
+    @Qualifier("retrievalExpertRagAdvisor")
+    public Advisor retrievalExpertRagAdvisor() {
+        return RetrievalAugmentationAdvisor.builder()
+                .documentRetriever(hybridDocumentRetriever())
+                .queryAugmenter(ContextualQueryAugmenterFactory.createInstanceForRetrievalExpertWithWebFallback())
+                .build();
+    }
 }
