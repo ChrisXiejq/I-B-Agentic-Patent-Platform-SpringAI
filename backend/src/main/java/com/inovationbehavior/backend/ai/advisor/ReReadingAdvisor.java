@@ -12,6 +12,7 @@ import reactor.core.publisher.Flux;
 /**
  * 自定义 Re2 Advisor
  * 可提高大型语言模型的推理能力
+ * 选择性注入，目前节约token不注入
  */
 public class ReReadingAdvisor implements CallAdvisor, StreamAdvisor {
 

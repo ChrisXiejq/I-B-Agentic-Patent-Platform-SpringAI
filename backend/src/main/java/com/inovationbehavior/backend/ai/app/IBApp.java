@@ -2,6 +2,7 @@ package com.inovationbehavior.backend.ai.app;
 
 import com.inovationbehavior.backend.ai.advisor.BannedWordsAdvisor;
 import com.inovationbehavior.backend.ai.advisor.MyLoggerAdvisor;
+import com.inovationbehavior.backend.ai.agent.GraphTaskAgent;
 import com.inovationbehavior.backend.ai.rag.preretrieval.QueryRewriter;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
@@ -17,10 +18,9 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
+import com.inovationbehavior.backend.ai.graph.PatentGraphRunner;
 
 import java.util.List;
 
@@ -31,7 +31,7 @@ public class IBApp {
     private final ChatModel chatModel;
 
     @Autowired(required = false)
-    private com.inovationbehavior.backend.ai.graph.PatentGraphRunner patentGraphRunner;
+    private PatentGraphRunner patentGraphRunner;
     private ChatClient chatClient;
 
     @Resource
@@ -68,58 +68,8 @@ public class IBApp {
                 .build();
     }
 
-    /**
-     * AI 基础对话（支持多轮对话记忆）
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
-    public String doChat(String message, String chatId) {
-        ChatResponse chatResponse = chatClient
-                .prompt()
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .call()
-                .chatResponse();
-        String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
-        return content;
-    }
-
-    /**
-     * AI 基础对话（支持多轮对话记忆，SSE 流式传输）
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
-    public Flux<String> doChatByStream(String message, String chatId) {
-        return chatClient
-                .prompt()
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .stream()
-                .content();
-    }
-
     /** 专利咨询报告（结构化输出：标题 + 建议列表） */
     record PatentReport(String title, List<String> suggestions) {
-    }
-
-    /**
-     * 专利咨询报告（实战结构化输出）
-     */
-    public PatentReport doChatWithReport(String message, String chatId) {
-        PatentReport report = chatClient
-                .prompt()
-                .system(SYSTEM_PROMPT + "After each conversation, generate a brief patent advisory report: title as 'Patent Advisory Report', content as a list of 3-5 suggestions addressing the user's question, related to patent commercialization, value assessment, or connection advice.")
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .call()
-                .entity(PatentReport.class);
-        log.info("patentReport: {}", report);
-        return report;
     }
 
     // RAG 知识库问答（专利/平台文档）
@@ -164,40 +114,6 @@ public class IBApp {
     @Resource
     private ToolCallback[] allTools;
 
-    /**
-     * 专利平台对话（支持调用工具：查专利详情、热度、用户身份等）
-     */
-    public Flux<String> doChatWithTools(String message, String chatId) {
-        return chatClient
-                .prompt()
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .toolCallbacks(allTools)
-                .stream()
-                .content();
-    }
-
-    // AI 调用 MCP 服务
-
-    @Resource
-    private ToolCallbackProvider toolCallbackProvider;
-
-    /**
-     * 专利平台对话（调用 MCP 服务）
-     */
-    public String doChatWithMcp(String message, String chatId) {
-        ChatResponse chatResponse = chatClient
-                .prompt()
-                .user(message)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
-                .toolCallbacks(toolCallbackProvider)
-                .call()
-                .chatResponse();
-        String content = chatResponse.getResult().getOutput().getText();
-        log.info("content: {}", content);
-        return content;
-    }
-
     // ========== 全能力 Agent：记忆按需检索（retrieve_history 工具）+ RAG + 工具调用 ==========
 
     @Autowired(required = false)
@@ -209,30 +125,10 @@ public class IBApp {
     private Advisor agentTraceAdvisor;
 
     /**
-     * 多 Agent 图编排入口（优先）。若未启用图则回退到单 Agent 全能力。
+     * 多 Agent 图编排入口
      */
     public String doChatWithMultiAgentOrFull(String message, String chatId) {
         return patentGraphRunner.run(message, chatId);
-    }
-
-    /**
-     * 全能力 Agent 流式调用。记忆按需通过 retrieve_history 工具获取。
-     */
-    public Flux<String> doChatWithFullAgentStream(String message, String chatId) {
-        String rewrittenMessage = queryRewriter != null ? queryRewriter.doQueryRewrite(message) : message;
-        var adv = chatClient.prompt().user(rewrittenMessage)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId));
-        if (agentTraceAdvisor != null) {
-            adv = adv.advisors(agentTraceAdvisor);
-        }
-        if (memoryPersistenceAdvisor != null) {
-            adv = adv.advisors(memoryPersistenceAdvisor);
-        }
-        return adv
-                .advisors(hybridRagAdvisor)
-                .toolCallbacks(allTools)
-                .stream()
-                .content();
     }
 
     // ========== 多 Agent 图编排：专家节点与路由/综合 ==========
@@ -252,6 +148,12 @@ public class IBApp {
             Use getUserIdentity, getPatentDetails, getPatentHeat when needed. Reply with actionable advice.
             """;
 
+    /** 图内专家 Agent 的下一步提示（think/act 循环中）：完成本任务、必要时调用工具、完成后可调用 doTerminate。 */
+    private static final String GRAPH_TASK_NEXT_STEP_PROMPT = """
+            Complete the current task using the available tools as needed. When you have enough information, summarize briefly for the user.
+            Call doTerminate when the task is done.
+            """;
+
     /**
      * 按任务类型返回对应 system prompt（Executor 单节点按 task 选 prompt）。
      */
@@ -265,8 +167,8 @@ public class IBApp {
     }
 
     /**
-     * Executor 单任务 ReAct 执行：对当前子任务运行一次 RAG + 工具调用（Spring AI 单次 call 内可多轮 tool call，即 ReAct 循环）。
-     * 若当前为 retrieval 且上一步为接口/连接失败，会在用户消息前注入「请用 searchWeb 补足」的提示。
+     * Executor 单任务 ReAct 执行：使用 IBManus 架构（GraphTaskAgent think→act 多步循环），
+     * 按任务类型注入 RAG/记忆/Trace，若 retrieval 上一步不足则注入 searchWeb 补足提示。
      */
     public String doReActForTask(String task, String message, String chatId, List<String> stepResults) {
         String systemPrompt = getPromptForTask(task);
@@ -278,11 +180,21 @@ public class IBApp {
                 log.info("[AgentGraph.IBApp] 检索重试：注入 searchWeb 补足提示，原消息长度={}", message != null ? message.length() : 0);
             }
         }
-        return doExpertChat(effectiveMessage, chatId, systemPrompt);
+        String rewritten = queryRewriter != null ? queryRewriter.doQueryRewrite(effectiveMessage) : effectiveMessage;
+        Advisor ragAdvisor = systemPrompt.contains("retrieval") && retrievalExpertRagAdvisor != null
+                ? retrievalExpertRagAdvisor : hybridRagAdvisor;
+        GraphTaskAgent agent = new GraphTaskAgent(
+                allTools, chatModel, systemPrompt, GRAPH_TASK_NEXT_STEP_PROMPT, chatId,
+                ragAdvisor, memoryPersistenceAdvisor, agentTraceAdvisor);
+        String out = agent.run(rewritten);
+        String expertName = systemPrompt.contains("retrieval") ? "Retrieval" : systemPrompt.contains("analysis") ? "Analysis" : "Advice";
+        log.info("[AgentGraph.IBApp] 专家调用(IBManus) expert={} messageLength={} responseLength={}",
+                expertName, effectiveMessage != null ? effectiveMessage.length() : 0, out != null ? out.length() : 0);
+        return out != null ? out : "";
     }
 
     /**
-     * 专家节点专用：按给定 systemPrompt 执行一次对话（RAG + 工具 + 记忆），用于图内检索/分析/建议节点。
+     * 专家节点专用：单次对话（RAG + 工具 + 记忆），不走 think/act 多步；保留供非图调用或兼容。
      */
     public String doExpertChat(String message, String chatId, String systemPrompt) {
         String rewritten = queryRewriter != null ? queryRewriter.doQueryRewrite(message) : message;

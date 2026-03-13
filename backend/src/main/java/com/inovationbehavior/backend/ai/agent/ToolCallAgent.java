@@ -7,6 +7,8 @@ import com.inovationbehavior.backend.ai.agent.model.AgentState;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -18,6 +20,7 @@ import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.tool.ToolCallback;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -41,6 +44,11 @@ public class ToolCallAgent extends ReActAgent {
     // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
     private final ChatOptions chatOptions;
 
+    /** 可选：图内使用时传入，用于记忆等 Advisor 的 conversationId */
+    private String conversationId;
+    /** 可选：图内使用时传入，如 RAG、记忆、Trace 等 Advisor */
+    private List<Advisor> extraAdvisors;
+
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
@@ -63,15 +71,22 @@ public class ToolCallAgent extends ReActAgent {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
             getMessageList().add(userMessage);
         }
-        // 2、调用 AI 大模型，获取工具调用结果
+        // 2、调用 AI 大模型，获取工具调用结果（若设置了 conversationId/extraAdvisors 则注入，供图内 RAG/记忆 使用）
         List<Message> messageList = getMessageList();
         Prompt prompt = new Prompt(messageList, this.chatOptions);
         try {
-            ChatResponse chatResponse = getChatClient().prompt(prompt)
+            var chain = getChatClient().prompt(prompt)
                     .system(getSystemPrompt())
-                    .tools((Object) availableTools)
-                    .call()
-                    .chatResponse();
+                    .tools((Object) availableTools);
+            if (getConversationId() != null) {
+                chain = chain.advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, getConversationId()));
+            }
+            if (getExtraAdvisors() != null) {
+                for (Advisor a : getExtraAdvisors()) {
+                    chain = chain.advisors(a);
+                }
+            }
+            ChatResponse chatResponse = chain.call().chatResponse();
             // 记录响应，用于等下 Act
             this.toolCallChatResponse = chatResponse;
             // 3、解析工具调用结果，获取要调用的工具
