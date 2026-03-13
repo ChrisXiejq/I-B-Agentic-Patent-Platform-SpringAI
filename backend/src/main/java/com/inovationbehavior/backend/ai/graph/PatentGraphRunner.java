@@ -62,8 +62,26 @@ public class PatentGraphRunner {
             return answer;
         } catch (Exception e) {
             log.error("{}图执行异常 chatId={} error={}", LOG_PREFIX, cid, e.getMessage(), e);
+            // 外部 API 瞬时错误（503/429 等）包装后抛出，便于测试/调用方识别并重试
+            if (isTransientApiFailure(e)) {
+                throw new RuntimeException("Transient API failure (e.g. 503), retry later: " + e.getMessage(), e);
+            }
             return "Sorry, the request could not be completed. Please try again.";
         }
+    }
+
+    private static boolean isTransientApiFailure(Throwable t) {
+        for (Throwable x = t; x != null; x = x.getCause()) {
+            String msg = x.getMessage();
+            if (msg != null) {
+                String m = msg.toLowerCase();
+                if (m.contains("503") || m.contains("429") || m.contains("high demand")
+                        || m.contains("rate limit") || m.contains("try again later")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static String abbreviate(String s, int maxLen) {

@@ -22,6 +22,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>覆盖的节点：Planner → Dispatch → Executor（按任务 retrieval/analysis/advice）→ CheckResult → AfterExpert →（Replan 或）Synthesize。
  * 工具覆盖（依赖模型在 ReAct 中的调用）：PatentDetail、PatentHeat、RAG、WebSearch、MemoryRetrieval(retrieve_history)、UserIdentity 等，
  * 由多步查询在一次运行中尽可能触发。
+ *
+ * <p>依赖真实 Gemini API 与 Redis/网络。若 Gemini 返回 503（high demand）等瞬时错误，测试会直接抛出该异常而非兜底文案，可稍后重试。
+ *
+ * <p>Mockito 警告：用 {@code mvn test} 运行时会自动加 -javaagent；在 IDE 中运行若仍见动态 agent 警告，可在测试的 VM 选项中加入
+ * {@code -javaagent:${user.home}/.m2/repository/org/mockito/mockito-core/.../mockito-core-...jar}（路径以本地 .m2 为准）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -57,7 +62,7 @@ class AgentFullPipelineTest {
     @Timeout(value = 180, unit = TimeUnit.SECONDS)
     void fullPipeline_patentQuery_mayInvokePatentAndRagTools() {
         String chatId = "test-patent-tools-" + System.currentTimeMillis();
-        String userMessage = "帮我查一个专利的详情和热度，并简要分析价值。";
+        String userMessage = "帮我查专利CN10000001-1的详情和热度，并简要分析价值。";
         String answer = patentGraphRunner.run(userMessage, chatId);
 
         assertNotNull(answer);

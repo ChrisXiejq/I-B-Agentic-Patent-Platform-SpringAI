@@ -227,6 +227,28 @@
 
 	<build>
 		<plugins>
+			<!-- 解析 byte-buddy-agent 路径，供 surefire argLine 使用 -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>set-agent-path</id>
+						<goals>
+							<goal>properties</goal>
+						</goals>
+						<phase>initialize</phase>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<!-- Mockito 以 agent 方式加载，避免 JDK 21+ 动态加载 agent 的警告与未来限制 -->
+					<argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar}</argLine>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>

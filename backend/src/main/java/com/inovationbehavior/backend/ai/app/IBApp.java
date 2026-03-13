@@ -212,33 +212,7 @@ public class IBApp {
      * 多 Agent 图编排入口（优先）。若未启用图则回退到单 Agent 全能力。
      */
     public String doChatWithMultiAgentOrFull(String message, String chatId) {
-        if (patentGraphRunner != null) {
-            return patentGraphRunner.run(message, chatId);
-        }
-        return doChatWithFullAgent(message, chatId);
-    }
-
-    /**
-     * 全能力 Agent 同步调用。记忆不自动注入；需要历史时 Agent 显式调用 retrieve_history(conversation_id, query)。
-     */
-    public String doChatWithFullAgent(String message, String chatId) {
-        String rewrittenMessage = queryRewriter != null ? queryRewriter.doQueryRewrite(message) : message;
-        var adv = chatClient.prompt().user(rewrittenMessage)
-                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId));
-        if (agentTraceAdvisor != null) {
-            adv = adv.advisors(agentTraceAdvisor);
-        }
-        if (memoryPersistenceAdvisor != null) {
-            adv = adv.advisors(memoryPersistenceAdvisor);
-        }
-        ChatResponse chatResponse = adv
-                .advisors(hybridRagAdvisor)
-                .toolCallbacks(allTools)
-                .call()
-                .chatResponse();
-        String content = chatResponse.getResult().getOutput().getText();
-        log.info("full-agent sync content length: {}", content != null ? content.length() : 0);
-        return content;
+        return patentGraphRunner.run(message, chatId);
     }
 
     /**
@@ -292,10 +266,19 @@ public class IBApp {
 
     /**
      * Executor 单任务 ReAct 执行：对当前子任务运行一次 RAG + 工具调用（Spring AI 单次 call 内可多轮 tool call，即 ReAct 循环）。
+     * 若当前为 retrieval 且上一步为接口/连接失败，会在用户消息前注入「请用 searchWeb 补足」的提示。
      */
     public String doReActForTask(String task, String message, String chatId, List<String> stepResults) {
         String systemPrompt = getPromptForTask(task);
-        return doExpertChat(message, chatId, systemPrompt);
+        String effectiveMessage = message;
+        if (task != null && task.toLowerCase().contains("retrieval") && stepResults != null && !stepResults.isEmpty()) {
+            String lastResult = stepResults.get(stepResults.size() - 1);
+            if (shouldRetryRetrievalWithWeb(lastResult)) {
+                effectiveMessage = "[上一轮检索无有效结果（接口失败或无数据），请改用 searchWeb 检索该专利或相关公开信息后简要回复。] 用户问题：" + (message != null ? message : "");
+                log.info("[AgentGraph.IBApp] 检索重试：注入 searchWeb 补足提示，原消息长度={}", message != null ? message.length() : 0);
+            }
+        }
+        return doExpertChat(effectiveMessage, chatId, systemPrompt);
     }
 
     /**
@@ -328,51 +311,7 @@ public class IBApp {
         return content != null ? content : "";
     }
 
-    /**
-     * 路由节点：对当前用户消息做意图分类，供图条件边使用。
-     * 返回: retrieval | analysis | advice | synthesize | end
-     */
-    public String classifyIntentForGraph(String userMessage, int stepCount, int maxSteps, List<String> stepResults) {
-        if (stepCount >= maxSteps) {
-            log.info("[AgentGraph.IBApp] 路由分类 stepCount>={} 强制 synthesize", maxSteps);
-            return "synthesize";
-        }
-        // 简单问候/自我介绍：直接进综合节点，不经过检索专家
-        if (stepCount == 0 && isSimpleGreetingOrIntro(userMessage)) {
-            log.info("[AgentGraph.IBApp] 路由分类 识别为简单问候/自我介绍，直接 synthesize");
-            return "synthesize";
-        }
-        String prompt = """
-                Classify the user intent into exactly one word: retrieval, analysis, advice, synthesize, or end.
-                - retrieval: user wants to query patent details, heat, or search knowledge (not simple greeting or self-intro).
-                - analysis: user wants technical/value analysis of a patent.
-                - advice: user wants commercialization, licensing, or partnership advice.
-                - synthesize: user said thanks or asked to summarize; or sent a simple greeting (e.g. 你好, hi) or asked for self-introduction (介绍自己, 你是谁); or we already have enough context.
-                - end: user said goodbye or clearly wants to end.
-                User message: %s
-                Reply with only one word from: retrieval, analysis, advice, synthesize, end.
-                """.formatted(userMessage);
-        ChatResponse resp = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .chatResponse();
-        String raw = resp.getResult().getOutput().getText();
-        if (raw == null) {
-            log.info("[AgentGraph.IBApp] 路由分类 LLM 返回空，使用 synthesize");
-            return "synthesize";
-        }
-        String lower = raw.trim().toLowerCase();
-        String decision = lower.contains("retrieval") ? "retrieval" : lower.contains("analysis") ? "analysis" : lower.contains("advice") ? "advice" : lower.contains("end") ? "end" : "synthesize";
-        // 若已有专家输出且意图仍为某类专家，直接 synthesize，避免同一问题重复进入检索/分析/建议专家
-        if (stepCount >= 1 && stepResults != null && !stepResults.isEmpty()
-                && ("retrieval".equals(decision) || "analysis".equals(decision) || "advice".equals(decision))) {
-            log.info("[AgentGraph.IBApp] 路由分类 已有 stepResults 且决策={}，改为 synthesize 避免重复专家调用", decision);
-            decision = "synthesize";
-        }
-        log.info("[AgentGraph.IBApp] 路由分类 userMessage(preview)={} stepCount={} 原始LLM回复={} 决策={}",
-                userMessage != null && userMessage.length() > 60 ? userMessage.substring(0, 60) + "..." : userMessage, stepCount, abbreviate(raw, 80), decision);
-        return decision;
-    }
+
 
     /** 简单问候或“介绍自己”类短句，无需走检索专家，直接 synthesize 即可 */
     private static boolean isSimpleGreetingOrIntro(String userMessage) {
@@ -438,9 +377,10 @@ public class IBApp {
             Step results so far: %s
             """;
     private static final String REPLAN_REMAINING_PROMPT = """
-            You are the replanner. We detected an environment change (e.g. patent invalid/expired, no data). The remaining planned steps were: %s.
+            You are the replanner. We detected an environment change (e.g. patent invalid/expired, no data, or API/connection failure). The remaining planned steps were: %s.
             Output a new comma-separated list of remaining steps only. Options: retrieval, analysis, advice, synthesize.
-            E.g. if patent is invalid, you might output: synthesize (to summarize and suggest alternatives). Or: retrieval,synthesize.
+            - If the last result shows API or connection failure (e.g. "Unable to connect to Redis", "Failed to query patent details", "Failed to query patent heat"), you MUST output: retrieval,synthesize (so we retry retrieval using web search to supplement).
+            - If patent is invalid/expired, output: synthesize. Or: retrieval,synthesize if we should try searchWeb first.
             Reply with only the comma-separated list.
             User message: %s
             Step results so far: %s
@@ -492,10 +432,16 @@ public class IBApp {
 
     /**
      * 仅重规划「剩余任务」：用于环境变化时更新剩余列表，返回新剩余步骤（不含已执行部分）。
+     * 若上一步为检索且结果不足（接口/连接失败，或 "I don't know"/无有效数据），强制返回 retrieval,synthesize 以便用 searchWeb 重试补足。
      */
     public List<String> replanRemaining(String userMessage, List<String> stepResults, List<String> remainingTasks) {
         if (userMessage == null) userMessage = "";
         if (stepResults == null) stepResults = List.of();
+        String lastResult = stepResults.isEmpty() ? "" : stepResults.get(stepResults.size() - 1);
+        if (shouldRetryRetrievalWithWeb(lastResult)) {
+            log.info("[AgentGraph.IBApp] 重规划剩余 检测到检索结果不足或接口失败，强制 retrieval,synthesize 以用 searchWeb 重试");
+            return List.of("retrieval", "synthesize");
+        }
         String prior = stepResults.isEmpty() ? "None" : String.join("\n---\n", stepResults);
         String remainingStr = (remainingTasks == null || remainingTasks.isEmpty()) ? "synthesize" : String.join(", ", remainingTasks);
         String prompt = REPLAN_REMAINING_PROMPT.formatted(remainingStr, userMessage, prior);
@@ -504,6 +450,28 @@ public class IBApp {
         List<String> newRemaining = parsePlan(raw);
         log.info("[AgentGraph.IBApp] 重规划剩余 remaining={} -> newRemaining={}", remainingTasks, newRemaining);
         return newRemaining.isEmpty() ? List.of("synthesize") : newRemaining;
+    }
+
+    /** 上一步结果是否为「专利接口/连接失败」且可用 searchWeb 补足（用于强制重试 retrieval） */
+    public static boolean isRetrievalFailureRecoverableWithWeb(String lastStepResult) {
+        if (lastStepResult == null || lastStepResult.isBlank()) return false;
+        String lower = lastStepResult.toLowerCase();
+        return lower.contains("unable to connect to redis") || lower.contains("failed to query patent")
+                || lower.contains("failed to query patent details") || lower.contains("failed to query patent heat")
+                || (lower.contains("connection") && lower.contains("redis"));
+    }
+
+    /**
+     * 是否应对检索步用 searchWeb 再试一次：接口/连接失败，或上一步为 retrieval 且结果不足（如 "I don't know"、无有效数据）。
+     * 为 true 时 Replan 强制 retrieval,synthesize，且第二次 retrieval 会注入「请用 searchWeb 补足」提示。
+     */
+    public static boolean shouldRetryRetrievalWithWeb(String lastStepResult) {
+        if (lastStepResult == null || lastStepResult.isBlank()) return false;
+        if (isRetrievalFailureRecoverableWithWeb(lastStepResult)) return true;
+        // 仅当上一步为 retrieval（stepResults 格式为 [Task:retrieval]\n...）且结果不足时，用 searchWeb 重试
+        String lower = lastStepResult.toLowerCase();
+        if (!lower.contains("task:retrieval") && !lower.contains("[task:retrieval]")) return false;
+        return isResultInsufficient(lastStepResult);
     }
 
     /**
