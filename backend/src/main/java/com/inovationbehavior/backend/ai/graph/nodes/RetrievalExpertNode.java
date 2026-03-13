@@ -32,11 +32,15 @@ public class RetrievalExpertNode {
         String out = ibApp.doExpertChat(message, chatId, ibApp.getRetrievalExpertPrompt());
         long elapsed = System.currentTimeMillis() - start;
         int nextCount = state.stepCount() + 1;
-        log.info("{}<<< 离开节点 | 输出长度={} 输出预览={} stepCount->{} elapsedMs={}",
-                LOG_PREFIX, out != null ? out.length() : 0, abbreviate(out, 200), nextCount, elapsed);
+        int nextStepIndex = state.currentStepIndex() + 1;
+        int needReplan = IBApp.isResultInsufficient(out) ? 1 : 0;
+        log.info("{}<<< 离开节点 | 输出长度={} 输出预览={} stepCount->{} currentStepIndex->{} needReplan={} elapsedMs={}",
+                LOG_PREFIX, out != null ? out.length() : 0, abbreviate(out, 200), nextCount, nextStepIndex, needReplan, elapsed);
         return Map.of(
                 PatentGraphState.STEP_RESULTS, "[Retrieval]\n" + out,
-                PatentGraphState.STEP_COUNT, nextCount
+                PatentGraphState.STEP_COUNT, nextCount,
+                PatentGraphState.CURRENT_STEP_INDEX, nextStepIndex,
+                PatentGraphState.NEED_REPLAN, needReplan
         );
     }
 

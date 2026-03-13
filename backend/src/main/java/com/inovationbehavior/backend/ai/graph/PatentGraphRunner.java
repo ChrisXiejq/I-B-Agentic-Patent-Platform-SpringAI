@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Map;
 
+import static java.util.Map.entry;
+
 /**
  * 执行专利多 Agent 图：注入初始状态，运行图，返回最终回复。
  */
@@ -32,15 +34,19 @@ public class PatentGraphRunner {
         String cid = chatId != null ? chatId : "default";
         log.info("{}======== 图执行开始 ======== chatId={} userMessage(length={}) preview={}",
                 LOG_PREFIX, cid, userMessage != null ? userMessage.length() : 0, abbreviate(userMessage, 120));
-        // 必须提供 schema 中所有 key 的非 null 初始值，否则 LangGraph4j 合并状态时会 NPE
-        Map<String, Object> initialState = Map.of(
-                PatentGraphState.USER_MESSAGE, userMessage != null ? userMessage : "",
-                PatentGraphState.CHAT_ID, cid,
-                PatentGraphState.STEP_RESULTS, new ArrayList<String>(),
-                PatentGraphState.NEXT_NODE, "",
-                PatentGraphState.FINAL_ANSWER, "",
-                PatentGraphState.STEP_COUNT, 0,
-                PatentGraphState.MAX_STEPS, maxSteps
+        // 必须提供 schema 中所有 key 的非 null 初始值，否则 LangGraph4j 合并状态时会 NPE（含 P&E 字段）
+        Map<String, Object> initialState = Map.ofEntries(
+                entry(PatentGraphState.USER_MESSAGE, userMessage != null ? userMessage : ""),
+                entry(PatentGraphState.CHAT_ID, cid),
+                entry(PatentGraphState.STEP_RESULTS, new ArrayList<String>()),
+                entry(PatentGraphState.NEXT_NODE, ""),
+                entry(PatentGraphState.FINAL_ANSWER, ""),
+                entry(PatentGraphState.STEP_COUNT, 0),
+                entry(PatentGraphState.MAX_STEPS, maxSteps),
+                entry(PatentGraphState.PLAN, new ArrayList<String>()),
+                entry(PatentGraphState.CURRENT_STEP_INDEX, 0),
+                entry(PatentGraphState.NEED_REPLAN, 0),
+                entry(PatentGraphState.ENVIRONMENT_CHANGED, 0)
         );
         RunnableConfig config = RunnableConfig.builder().threadId(cid).build();
         try {
@@ -49,11 +55,13 @@ public class PatentGraphRunner {
                     .map(s -> s.finalAnswer().orElse(""))
                     .orElse("Sorry, the request could not be completed. Please try again.");
             int stepCount = finalState.map(PatentGraphState::stepCount).orElse(0);
-            log.info("{}======== 图执行结束 ======== chatId={} stepCount={} finalAnswer(length={}) preview={}",
-                    LOG_PREFIX, cid, stepCount, answer != null ? answer.length() : 0, abbreviate(answer, 150));
+            int planSize = finalState.map(s -> s.plan().size()).orElse(0);
+            int stepResultsSize = finalState.map(s -> s.stepResults().size()).orElse(0);
+            log.info("{}======== 图执行结束 ======== chatId={} stepCount={} planSize={} stepResultsSize={} finalAnswer(length={}) preview={}",
+                    LOG_PREFIX, cid, stepCount, planSize, stepResultsSize, answer != null ? answer.length() : 0, abbreviate(answer, 150));
             return answer;
         } catch (Exception e) {
-            log.error("{}图执行异常 chatId={}", LOG_PREFIX, cid, e);
+            log.error("{}图执行异常 chatId={} error={}", LOG_PREFIX, cid, e.getMessage(), e);
             return "Sorry, the request could not be completed. Please try again.";
         }
     }

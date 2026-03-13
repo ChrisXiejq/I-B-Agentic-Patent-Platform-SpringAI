@@ -169,12 +169,15 @@ app:
       max-ragas-samples: 5         # RAGAS 评估最多样本数（每条约 4 次 LLM 调用，建议先设小值）
       ragas-export-path: "target/ragas-eval-input.json"  # Java 导出供 Python ragas 读取的文件路径
 
-# 日志级别：Agent 图编排与 Spring AI 调用细节
+# 日志级别：Agent 图编排与 Spring AI 调用细节（运行与排查时建议保持 INFO 以上）
 logging:
   level:
     org.springframework.ai: DEBUG
-    # 多 Agent 图：节点进入/离开、路由决策、专家输出预览、图执行开始/结束（[AgentGraph] 前缀）
+    # 多 Agent 图：节点进入/离开、当前任务、计划与步数、图执行开始/结束（[AgentGraph] 前缀）
     com.inovationbehavior.backend.ai.graph: INFO
     com.inovationbehavior.backend.ai.app: INFO
     # 工具调用追踪：每次工具 name、input、result 预览（需 app.agent.trace-tools=true）
     com.inovationbehavior.backend.ai.config.TracingToolCallbackProvider: INFO
+    # 请求/响应与 Agent 追踪（Request/Response/ToolCall 预览）
+    com.inovationbehavior.backend.ai.advisor.AgentTraceAdvisor: INFO
+    com.inovationbehavior.backend.ai.advisor.MyLoggerAdvisor: INFO

@@ -20,17 +20,24 @@ import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
 
 /**
- * 专利平台多 Agent 图编排配置：Router → 检索/分析/建议专家 → 综合 → END。
+ * 专利平台多 Agent 图编排配置（P&E + Replan）。
+ * 1. Planner：生成 Task List。
+ * 2. Executor：针对每个子任务启动 ReAct 循环（RAG + 工具调用）。
+ * 3. CheckResult：每执行完一个子任务检查环境变化；Re-planner 动态更新剩余任务列表。
+ * 流程：START → planner → dispatch → (executor|synthesize)；executor → checkResult → afterExpert；
+ * afterExpert → (replan|synthesize|dispatch)；replan → dispatch；synthesize → END。
  */
 @Configuration
 @Slf4j
 @RequiredArgsConstructor
 public class PatentAgentGraphConfig {
 
-    private final RouterNode routerNode;
-    private final RetrievalExpertNode retrievalExpertNode;
-    private final AnalysisExpertNode analysisExpertNode;
-    private final AdviceExpertNode adviceExpertNode;
+    private final PlannerNode plannerNode;
+    private final DispatchNode dispatchNode;
+    private final ExecutorNode executorNode;
+    private final CheckResultNode checkResultNode;
+    private final AfterExpertNode afterExpertNode;
+    private final ReplanNode replanNode;
     private final SynthesizeNode synthesizeNode;
 
     @Value("${app.agent.graph.max-steps:5}")
@@ -39,22 +46,27 @@ public class PatentAgentGraphConfig {
     @Bean
     public CompiledGraph<PatentGraphState> patentAgentGraph() throws GraphStateException {
         StateGraph<PatentGraphState> graph = new StateGraph<>(PatentGraphState.SCHEMA, PatentGraphState::new)
-                .addNode("router", node(state -> routerNode.apply(state)))
-                .addNode("retrievalExpert", node(state -> retrievalExpertNode.apply(state)))
-                .addNode("analysisExpert", node(state -> analysisExpertNode.apply(state)))
-                .addNode("adviceExpert", node(state -> adviceExpertNode.apply(state)))
+                .addNode("planner", node(state -> plannerNode.apply(state)))
+                .addNode("dispatch", node(state -> dispatchNode.apply(state)))
+                .addNode("executor", node(state -> executorNode.apply(state)))
+                .addNode("checkResult", node(state -> checkResultNode.apply(state)))
+                .addNode("afterExpert", node(state -> afterExpertNode.apply(state)))
+                .addNode("replan", node(state -> replanNode.apply(state)))
                 .addNode("synthesize", node(state -> synthesizeNode.apply(state)))
-                .addEdge(START, "router")
-                .addConditionalEdges("router", (PatentGraphState state) -> CompletableFuture.completedFuture(state.nextNode().orElse("synthesize")),
+                .addEdge(START, "planner")
+                .addEdge("planner", "dispatch")
+                .addConditionalEdges("dispatch", (PatentGraphState state) -> CompletableFuture.completedFuture(state.nextNode().orElse("synthesize")),
                         Map.of(
-                                "retrieval", "retrievalExpert",
-                                "analysis", "analysisExpert",
-                                "advice", "adviceExpert",
+                                "executor", "executor",
+                                "synthesize", "synthesize"))
+                .addEdge("executor", "checkResult")
+                .addEdge("checkResult", "afterExpert")
+                .addConditionalEdges("afterExpert", (PatentGraphState state) -> CompletableFuture.completedFuture(state.nextNode().orElse("synthesize")),
+                        Map.of(
+                                "replan", "replan",
                                 "synthesize", "synthesize",
-                                "end", "synthesize"))  // end 也走综合节点，生成告别语
-                .addEdge("retrievalExpert", "router")
-                .addEdge("analysisExpert", "router")
-                .addEdge("adviceExpert", "router")
+                                "dispatch", "dispatch"))
+                .addEdge("replan", "dispatch")
                 .addEdge("synthesize", END);
 
         return graph.compile(CompileConfig.builder().recursionLimit(30).build());
