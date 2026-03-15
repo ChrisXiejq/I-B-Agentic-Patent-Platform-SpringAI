@@ -10,8 +10,8 @@ public class TemporaryCredentialsProvider {
 
         try {
             //这里的 SecretId 和 SecretKey 代表了用于申请临时密钥的永久身份（主账号、子账号等），子账号需要具有操作存储桶的权限。
-            String secretId = "AKIDDM5M3q1LmEwcKxT0UtZAgKTYZPTblu5E";//用户的 SecretId，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
-            String secretKey = "Of2MmLPScvGoHmQqLqjjimUUPTAEdq7R";//用户的 SecretKey，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
+            String secretId = "";//用户的 SecretId，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
+            String secretKey = "";//用户的 SecretKey，建议使用子账号密钥，授权遵循最小权限指引，降低使用风险。子账号密钥获取可参见 https://cloud.tencent.com/document/product/598/37140
             // 替换为您的云 api 密钥 SecretId
             config.put("secretId", secretId);
             // 替换为您的云 api 密钥 SecretKey
